@@ -2,9 +2,24 @@
 import argparse
 import time
 import yaml
+import http
+import logging
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 from urllib.request import urlopen
+
+def push_alert(msg, pushover_app, pushover_user):
+    try:
+        conn = http.client.HTTPSConnection("api.pushover.net:443")
+        logging.info("Pushover: %s", msg)
+        conn.request("POST", "/1/messages.json", urlencode({
+            'token': pushover_app,
+            'user': pushover_user,
+            'message': msg,
+        }), {'Content-type': 'application/x-www-form-urlencoded'})
+        return conn.getresponse()
+    except:
+        pass
 
 def parse_row(x):
     for a in x.find_all('td', recursive=False):
@@ -55,7 +70,7 @@ class GradeSource:
                 self.scores[data[0]] = data[2:]
 
     def __getitem__(self, x):
-        if self.scores is None:
+        if self.scales is None:
             return dict(zip(self.labels, self.scores[x]))
         else:
             scores = ['/'.join(a for a in i if a)
@@ -65,17 +80,19 @@ class GradeSource:
     def __hasitem__(self, x):
         return x in self.scores
 
+    def __repr__(self):
+        return "GradeSource(%s)" % self.url
+
 class GradeSourceMonitor:
     def __init__(self, url, secret):
-        self.cur = None
+        self.cur = {}
         self.secret = secret
-        self.last = None
+        self.last = {}
         try:
             self.gs = GradeSource(url)
             self.cur = self.gs[self.secret]
         except Exception:
-            print("TOP LEL")
-            raise
+            logging.exception("Could not load GradeSource for %s" % url)
 
     def update(self):
         try:
@@ -83,7 +100,7 @@ class GradeSourceMonitor:
             self.last = self.cur
             self.cur = self.gs[self.secret]
         except Exception:
-            pass
+            logging.exception("Could not update GradeSource for %s" % self.gs)
 
         if self.last != self.cur:
             for removed in self.last.keys() - self.cur.keys():
@@ -113,11 +130,14 @@ if __name__ == '__main__':
         config.update(yaml.safe_load(f.read()))
 
     mon = {}
-    for name, target in config['targets'].items():
-        mon[name] = GradeSourceMonitor(target['url'], str(target['secret']))
+    for course in config['courses']:
+        mon[course['name']] = GradeSourceMonitor(course['url'], str(course['secret']))
 
     while True:
         for course, grades in mon.items():
             for notices in grades.update():
-                print("%s: %s" % (course, notices))
+                msg = "%s: %s" % (course, notices)
+                print(msg)
+                if 'pushover' in config:
+                    push_alert(msg, config['pushover']['app'], config['pushover']['user'])
             time.sleep(config['wait']/len(mon))
