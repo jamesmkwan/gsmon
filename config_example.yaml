@@ -1,0 +1,23 @@
+courses:
+    - name: CSEXXX
+      url: http://www.gradesource.com/reports/XXXX/XXXXX/
+      secret: XXXX
+    - name: CSEXXX
+      url: http://www.gradesource.com/reports/3851/26074/
+      secret: XXXX
+logging:
+    version: 1
+    formatters:
+        basic:
+            format: "%(asctime)s %(levelname)s %(message)s"
+            datefmt: "%Y-%m-%d %H:%M:%S"
+    handlers:
+        console:
+            class: logging.StreamHandler
+            formatter: basic
+            stream: ext://sys.stderr
+            level: DEBUG
+    root:
+        level: DEBUG
+        handlers:
+        - console

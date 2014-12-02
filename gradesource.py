@@ -124,7 +124,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     config = {
-        'wait': 60
+        'wait': 60,
+        'courses': {}
     }
 
     with open(args.config) as f:
