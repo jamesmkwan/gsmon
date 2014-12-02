@@ -4,11 +4,12 @@ import time
 import yaml
 import http
 import logging
+import logging.config
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlencode
 from urllib.request import urlopen
 
-def push_alert(msg, pushover_app, pushover_user):
+def push_alert(msg, pushover_app, pushover_user, priority=-1):
     try:
         conn = http.client.HTTPSConnection("api.pushover.net:443")
         logging.info("Pushover: %s", msg)
@@ -16,6 +17,7 @@ def push_alert(msg, pushover_app, pushover_user):
             'token': pushover_app,
             'user': pushover_user,
             'message': msg,
+            'priority': priority,
         }), {'Content-type': 'application/x-www-form-urlencoded'})
         return conn.getresponse()
     except:
@@ -128,6 +130,8 @@ if __name__ == '__main__':
     with open(args.config) as f:
         config.update(yaml.safe_load(f.read()))
 
+    logging.config.dictConfig(config['logging'])
+
     mon = {}
     for course in config['courses']:
         mon[course['name']] = GradeSourceMonitor(course['url'], str(course['secret']))
@@ -138,5 +142,5 @@ if __name__ == '__main__':
                 msg = "%s: %s" % (course, notices)
                 print(msg)
                 if 'pushover' in config:
-                    push_alert(msg, config['pushover']['app'], config['pushover']['user'])
+                    push_alert(msg, config['pushover']['app'], config['pushover']['user'], config['pushover']['priority'])
             time.sleep(config['wait']/len(mon))
