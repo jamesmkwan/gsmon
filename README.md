@@ -5,8 +5,8 @@ gsmon is a script for scraping gradesource for new grades.  Provides default
 support for sending notifications through pushover. It should be easy to add
 support for other notification systems, but I don't use any of them.
 
-Run with `python3 gradesource.py <config>` where config is a yaml file with
-your configuration. See config\_example.yaml for an example configuration.
+Run with `python3 gsmon.py <config>` where config is a yaml file with your
+configuration. See config\_example.yaml for an example configuration.
 
 Since the program doesn't fork, it's recommended to run inside something like
 screen or tmux.
