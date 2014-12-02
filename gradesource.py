@@ -87,7 +87,6 @@ class GradeSourceMonitor:
     def __init__(self, url, secret):
         self.cur = {}
         self.secret = secret
-        self.last = {}
         try:
             self.gs = GradeSource(url)
             self.cur = self.gs[self.secret]
@@ -97,24 +96,24 @@ class GradeSourceMonitor:
     def update(self):
         try:
             self.gs.update()
-            self.last = self.cur
+            last = self.cur
             self.cur = self.gs[self.secret]
         except Exception:
             logging.exception("Could not update GradeSource for %s" % self.gs)
 
-        if self.last != self.cur:
-            for removed in self.last.keys() - self.cur.keys():
+        if last != self.cur:
+            for removed in last.keys() - self.cur.keys():
                 yield "%s removed" % removed
 
-            for new in self.cur.keys() - self.last.keys():
+            for new in self.cur.keys() - last.keys():
                 yield "%s: %s" % (new, self.cur[new])
 
-            for same in self.cur.keys() & self.last.keys():
-                if self.cur[same] != self.last[same]:
+            for same in self.cur.keys() & last.keys():
+                if self.cur[same] != last[same]:
                     yield "%s: %s (from %s)" % (
                         same,
                         self.cur[same],
-                        self.last[same]
+                        last[same]
                     )
 
 if __name__ == '__main__':
