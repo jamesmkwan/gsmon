@@ -20,8 +20,8 @@ def push_alert(msg, pushover_app, pushover_user, priority=-1):
             'priority': priority,
         }), {'Content-type': 'application/x-www-form-urlencoded'})
         return conn.getresponse()
-    except:
-        pass
+    except Exception:
+        logging.exception("Error sending pushover notification")
 
 def parse_row(x):
     for a in x.find_all('td', recursive=False):
