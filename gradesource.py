@@ -4,6 +4,7 @@ import time
 import yaml
 import http
 import logging
+import logging.config
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlencode
 from urllib.request import urlopen
@@ -128,6 +129,8 @@ if __name__ == '__main__':
 
     with open(args.config) as f:
         config.update(yaml.safe_load(f.read()))
+
+    logging.config.dictConfig(config['logging'])
 
     mon = {}
     for course in config['courses']:
