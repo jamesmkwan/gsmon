@@ -1,147 +1,113 @@
 #!/usr/bin/env python3
-import argparse
-import time
-import yaml
-import http
-import logging
-import logging.config
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlencode
+from lxml import html
+from urllib.parse import urlencode
 from urllib.request import urlopen
+import argparse
+import collections
+import http
+import itertools
+import textwrap
+import time
+import traceback
 
-def push_alert(msg, pushover_app, pushover_user, priority=-1):
-    try:
-        conn = http.client.HTTPSConnection("api.pushover.net:443")
-        logging.info("Pushover: %s", msg)
-        conn.request("POST", "/1/messages.json", urlencode({
-            'token': pushover_app,
-            'user': pushover_user,
-            'message': msg,
-            'priority': priority,
-        }), {'Content-type': 'application/x-www-form-urlencoded'})
-        return conn.getresponse()
-    except Exception:
-        logging.exception("Error sending pushover notification")
+def read_gradesource(url):
+    with urlopen(url) as f:
+        html_data = f.read()
+    root = html.fromstring(html_data)
+    ele = next(x for x in root.iterdescendants('td') if x.text_content() == 'Secret Number')
+    table = next(x for x in ele.iterancestors() if x.tag == 'table')
 
-def parse_row(x):
-    for a in x.find_all('td', recursive=False):
-        r = a.get_text().strip()
-        try:
-            # If there is a colspan of x, we yield x times
-            for x in range(int(a['colspan'])):
-                yield r
-        except KeyError:
-            yield r
+    parsing_headers = True
+    headers = []
+    grades = {}
+    for row in table.iterchildren():
+        data = []
+        for item in row.iterchildren():
+            for repeat in range(int(item.attrib.get('colspan', 1))):
+                data.append(str(item.text_content()))
 
-def find_grade_table(soup):
-    # TODO: make it less ghetto
-    for ele in soup.find_all('table'):
-        for row in ele.find_all('tr', recursive=False):
-            for dat in row.find_all('td', recursive=False):
-                try:
-                    if dat.get_text() == "Secret Number":
-                        return ele
-                except AttributeError:
-                    pass
-
-def grade_table(html_data):
-    soup = BeautifulSoup(html_data)
-    table = find_grade_table(soup)
-    data = table.find_all('tr')
-    return [list(parse_row(d)) for d in data]
-
-class GradeSource:
-    def __init__(self, url):
-        self.url = url
-        self.update()
-
-    def update(self):
-        with urlopen(urljoin(self.url, 'scores.html')) as f:
-            html_data = f.read()
-
-        rows = grade_table(html_data)
-
-        self.labels = [' '.join(i for i in x if i) for x in zip(*rows[0:2])][2:]
-
-        self.scores = {}
-        self.scales = None
-        for data in rows[2:]:
-            if data[0] == '':
-                self.scales = data[2:]
+        if len(data[0]) == 4:
+            grades[data[0]] = data[2:]
+        elif not grades:
+            if headers:
+                for header, h in zip(headers, itertools.islice(data, 2, None)):
+                    header.append(h.strip('\xa0'))
             else:
-                self.scores[data[0]] = data[2:]
+                for h in itertools.islice(data, 2, None):
+                    headers.append([h])
 
-    def __getitem__(self, x):
-        if self.scales is None:
-            return dict(zip(self.labels, self.scores[x]))
-        else:
-            scores = ['/'.join(a for a in i if a)
-                      for i in zip(self.scores[x], self.scales)]
-            return dict(zip(self.labels, scores))
+    return headers, grades
 
-    def __hasitem__(self, x):
-        return x in self.scores
+Grade = collections.namedtuple('Grade', ['score', 'name', 'rank'])
+def fetch_grades(gradesource, secret_number):
+    headers, all_grades = read_gradesource(gradesource)
+    grades = all_grades[secret_number]
 
-    def __repr__(self):
-        return "GradeSource(%s)" % self.url
-
-class GradeSourceMonitor:
-    def __init__(self, url, secret):
-        self.cur = {}
-        self.secret = secret
+    for (rankhdrs, rank), (scorehdrs, score) in zip(*(zip(headers, grades),)*2):
+        assert rankhdrs[1] == 'Rank'
+        assert rankhdrs[0] == scorehdrs[0]
+        assert scorehdrs[1] == 'Score'
         try:
-            self.gs = GradeSource(url)
-            self.cur = self.gs[self.secret]
-        except Exception:
-            logging.exception("Could not load GradeSource for %s" % url)
+            if scorehdrs[2]:
+                score = "%s/%s" % (score, scorehdrs[2])
+        except KeyError:
+            pass
 
-    def update(self):
+        yield Grade(score, rankhdrs[0], rank)
+
+def push_alert(msg, pushover_app, pushover_user):
+    conn = http.client.HTTPSConnection("api.pushover.net:443")
+    conn.request("POST", "/1/messages.json", urlencode({
+        'token': pushover_app,
+        'user': pushover_user,
+        'message': msg,
+    }), {'Content-type': 'application/x-www-form-urlencoded'})
+    return conn.getresponse()
+
+def checker(classes, grades, cb):
+    for c in classes:
+        prev = grades[c] if c in grades else set()
+        cur = set(fetch_grades(c.gradesource, c.secret_number))
+        if cur != prev:
+            for g in cur - prev:
+                cb("+ %s %s: %s (Rank %s)" % (c.name, g.name, g.score, g.rank))
+
+            for g in prev - cur:
+                cb("- %s %s: %s (Rank %s)" % (c.name, g.name, g.score, g.rank))
+
+        grades[c] = cur
+        time.sleep(1)
+
+def main(classes, interval, pushover=None):
+    def cb(s):
         try:
-            self.gs.update()
-            last = self.cur
-            self.cur = self.gs[self.secret]
+            print(s)
+            if pushover is not None:
+                push_alert(s, pushover[0], pushover[1])
         except Exception:
-            logging.exception("Could not update GradeSource for %s" % self.gs)
+            traceback.print_exc()
 
-        if last != self.cur:
-            for removed in last.keys() - self.cur.keys():
-                yield "%s removed" % removed
-
-            for new in self.cur.keys() - last.keys():
-                yield "%s: %s" % (new, self.cur[new])
-
-            for same in self.cur.keys() & last.keys():
-                if self.cur[same] != last[same]:
-                    yield "%s: %s (from %s)" % (
-                        same,
-                        self.cur[same],
-                        last[same]
-                    )
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Gradesource Monitor')
-    parser.add_argument('config')
-    args = parser.parse_args()
-
-    config = {
-        'wait': 60,
-        'courses': {}
-    }
-
-    with open(args.config) as f:
-        config.update(yaml.safe_load(f.read()))
-
-    logging.config.dictConfig(config['logging'])
-
-    mon = {}
-    for course in config['courses']:
-        mon[course['name']] = GradeSourceMonitor(course['url'], str(course['secret']))
+    grades = {}
+    checker(classes, grades, print)
+    print('{:=^78}'.format("Initialized"))
 
     while True:
-        for course, grades in mon.items():
-            for notices in grades.update():
-                msg = "%s: %s" % (course, notices)
-                print(msg)
-                if 'pushover' in config:
-                    push_alert(msg, config['pushover']['app'], config['pushover']['user'], config['pushover']['priority'])
-            time.sleep(config['wait']/len(mon))
+        try:
+            checker(classes, grades, cb)
+        except Exception:
+            traceback.print_exc()
+
+        time.sleep(interval)
+
+Class = collections.namedtuple('Class', ['name', 'gradesource', 'secret_number'])
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
+    parser.add_argument('--interval', type=int, default=60,
+            help='Interval between checks')
+    parser.add_argument('--pushover', nargs=2, metavar=('TOKEN', 'USER'),
+            help='Pushover app credentials')
+    parser.add_argument('--class', action='append', nargs=3, default=[],
+            metavar=('NAME', 'GRADESOURCE_URL', 'SECRET_NUMBER'))
+    args = parser.parse_args()
+
+    main([Class(*c) for c in getattr(args, 'class')], args.interval, args.pushover)
