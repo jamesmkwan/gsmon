@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 import argparse
 import collections
+import datetime
 import http
 import itertools
 import textwrap
@@ -17,7 +18,6 @@ def read_gradesource(url):
     ele = next(x for x in root.iterdescendants('td') if x.text_content() == 'Secret Number')
     table = next(x for x in ele.iterancestors() if x.tag == 'table')
 
-    parsing_headers = True
     headers = []
     grades = {}
     for row in table.iterchildren():
@@ -78,26 +78,29 @@ def checker(classes, grades, cb):
         grades[c] = cur
         time.sleep(1)
 
+def timestamped_print(s):
+    print("%s %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), s))
+
 def main(classes, interval, pushover=None):
     def cb(s):
         try:
-            print(s)
+            timestamped_print(s)
             if pushover is not None:
                 push_alert(s, pushover[0], pushover[1])
         except Exception:
             traceback.print_exc()
 
     grades = {}
-    checker(classes, grades, print)
+    checker(classes, grades, timestamped_print)
     print('{:=^78}'.format("Initialized"))
 
     while True:
+        time.sleep(interval)
+
         try:
             checker(classes, grades, cb)
         except Exception:
             traceback.print_exc()
-
-        time.sleep(interval)
 
 Class = collections.namedtuple('Class', ['name', 'gradesource', 'secret_number'])
 if __name__ == '__main__':
