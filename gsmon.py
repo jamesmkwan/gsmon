@@ -7,7 +7,6 @@ import collections
 import datetime
 import http
 import itertools
-import textwrap
 import time
 import traceback
 
@@ -15,7 +14,8 @@ def read_gradesource(url):
     with urlopen(url) as f:
         html_data = f.read().replace(b'&nbsp;', b'')
     root = html.fromstring(html_data)
-    ele = next(x for x in root.iterdescendants('td') if x.text_content() == 'Secret Number')
+    ele = next(x for x in root.iterdescendants('td')
+                 if x.text_content() == 'Secret Number')
     table = next(x for x in ele.iterancestors() if x.tag == 'table')
 
     headers = []
@@ -39,9 +39,9 @@ def read_gradesource(url):
     return headers, grades
 
 Grade = collections.namedtuple('Grade', ['name', 'score', 'rank'])
-def fetch_grades(gradesource, secret_number):
+def fetch_grades(gradesource, secretnumber):
     headers, all_grades = read_gradesource(gradesource)
-    grades = all_grades[secret_number]
+    grades = all_grades[secretnumber]
 
     for header, score, *rest in zip(headers, grades, *all_grades.values()):
         if header[1] == 'Rank':
@@ -75,7 +75,7 @@ class Checker:
 
     def update(self):
         cls_name = self.cls.name
-        grades = set(fetch_grades(self.cls.gradesource, self.cls.secret_number))
+        grades = set(fetch_grades(self.cls.gradesource, self.cls.secretnumber))
 
         for g in sorted(grades - self.grades):
             self.grades.add(g)
@@ -101,13 +101,13 @@ def main(classes, interval, pushover=None):
         time.sleep(interval)
         try:
             for update in c.update():
-                timestamped_print(s)
+                timestamped_print(update)
                 if pushover is not None:
-                    push_alert(s, pushover[0], pushover[1])
+                    push_alert(update, pushover[0], pushover[1])
         except Exception:
             traceback.print_exc()
 
-Class = collections.namedtuple('Class', ['name', 'gradesource', 'secret_number'])
+Class = collections.namedtuple('Class', ['name', 'gradesource', 'secretnumber'])
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
     parser.add_argument('--interval', type=int, default=30,
@@ -117,6 +117,6 @@ if __name__ == '__main__':
     parser.add_argument('--class', action='append', nargs=3, default=[],
             metavar=('NAME', 'GRADESOURCE_URL', 'SECRET_NUMBER'), required=True,
             help='use the assessment page (/scores.html) for url')
-    args = parser.parse_args()
+    args = vars(parser.parse_args())
 
-    main([Class(*c) for c in getattr(args, 'class')], args.interval, args.pushover)
+    main([Class(*c) for c in args['class']], args['interval'], args['pushover'])
