@@ -13,7 +13,7 @@ import traceback
 
 def read_gradesource(url):
     with urlopen(url) as f:
-        html_data = f.read()
+        html_data = f.read().replace(b'&nbsp;', b'')
     root = html.fromstring(html_data)
     ele = next(x for x in root.iterdescendants('td') if x.text_content() == 'Secret Number')
     table = next(x for x in ele.iterancestors() if x.tag == 'table')
@@ -31,7 +31,7 @@ def read_gradesource(url):
         elif not grades:
             if headers:
                 for header, h in zip(headers, itertools.islice(data, 2, None)):
-                    header.append(h.strip('\xa0'))
+                    header.append(h)
             else:
                 for h in itertools.islice(data, 2, None):
                     headers.append([h])
@@ -43,17 +43,21 @@ def fetch_grades(gradesource, secret_number):
     headers, all_grades = read_gradesource(gradesource)
     grades = all_grades[secret_number]
 
-    for (rankhdrs, rank), (scorehdrs, score) in zip(*(zip(headers, grades),)*2):
-        assert rankhdrs[1] == 'Rank'
-        assert rankhdrs[0] == scorehdrs[0]
-        assert scorehdrs[1] == 'Score'
-        try:
-            if scorehdrs[2]:
-                score = "%s/%s" % (score, scorehdrs[2])
-        except KeyError:
-            pass
+    for header, score, *rest in zip(headers, grades, *all_grades.values()):
+        if header[1] == 'Rank':
+            continue
+        assert header[1] == 'Score'
 
-        yield Grade(score, rankhdrs[0], rank)
+        try:
+            s = sorted((i for i in rest if i), key=float, reverse=True)
+            rank = s.index(score) + 1
+        except ValueError:
+            rank = "?"
+
+        if len(header) > 2 and header[2]:
+            score = "%s/%s" % (score, header[2])
+
+        yield Grade(score, header[0], rank)
 
 def push_alert(msg, pushover_app, pushover_user):
     conn = http.client.HTTPSConnection("api.pushover.net:443")
@@ -76,7 +80,17 @@ def checker(classes, grades, cb):
                 cb("- %s %s: %s (Rank %s)" % (c.name, g.name, g.score, g.rank))
 
         grades[c] = cur
-        time.sleep(1)
+
+def sleepy(x, sleep=1):
+    f = iter(x)
+    try:
+        e = next(f)
+        while f:
+            yield e
+            e = next(f)
+            time.sleep(sleep)
+    except StopIteration:
+        pass
 
 def timestamped_print(s):
     print("%s %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), s))
@@ -91,14 +105,14 @@ def main(classes, interval, pushover=None):
             traceback.print_exc()
 
     grades = {}
-    checker(classes, grades, timestamped_print)
+    checker(sleepy(classes), grades, timestamped_print)
     print('{:=^78}'.format("Initialized"))
 
     while True:
         time.sleep(interval)
 
         try:
-            checker(classes, grades, cb)
+            checker(sleepy(classes), grades, cb)
         except Exception:
             traceback.print_exc()
 
