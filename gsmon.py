@@ -38,7 +38,7 @@ def read_gradesource(url):
 
     return headers, grades
 
-Grade = collections.namedtuple('Grade', ['score', 'name', 'rank'])
+Grade = collections.namedtuple('Grade', ['name', 'score', 'rank'])
 def fetch_grades(gradesource, secret_number):
     headers, all_grades = read_gradesource(gradesource)
     grades = all_grades[secret_number]
@@ -57,7 +57,7 @@ def fetch_grades(gradesource, secret_number):
         if len(header) > 2 and header[2]:
             score = "%s/%s" % (score, header[2])
 
-        yield Grade(score, header[0], rank)
+        yield Grade(header[0], score, rank)
 
 def push_alert(msg, pushover_app, pushover_user):
     conn = http.client.HTTPSConnection("api.pushover.net:443")
@@ -68,63 +68,55 @@ def push_alert(msg, pushover_app, pushover_user):
     }), {'Content-type': 'application/x-www-form-urlencoded'})
     return conn.getresponse()
 
-def checker(classes, grades, cb):
-    for c in classes:
-        prev = grades[c] if c in grades else set()
-        cur = set(fetch_grades(c.gradesource, c.secret_number))
-        if cur != prev:
-            for g in cur - prev:
-                cb("+ %s %s: %s (Rank %s)" % (c.name, g.name, g.score, g.rank))
+class Checker:
+    def __init__(self, cls):
+        self.cls = cls
+        self.grades = set()
 
-            for g in prev - cur:
-                cb("- %s %s: %s (Rank %s)" % (c.name, g.name, g.score, g.rank))
+    def update(self):
+        cls_name = self.cls.name
+        grades = set(fetch_grades(self.cls.gradesource, self.cls.secret_number))
 
-        grades[c] = cur
+        for g in sorted(grades - self.grades):
+            self.grades.add(g)
+            yield "+ %s %s: %s (Rank %s)" % (cls_name, g.name, g.score, g.rank)
 
-def sleepy(x, sleep=1):
-    f = iter(x)
-    try:
-        e = next(f)
-        while f:
-            yield e
-            e = next(f)
-            time.sleep(sleep)
-    except StopIteration:
-        pass
+        for g in sorted(self.grades - grades):
+            self.grades.remove(g)
+            yield "- %s %s: %s (Rank %s)" % (cls_name, g.name, g.score, g.rank)
 
 def timestamped_print(s):
     print("%s %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), s))
 
 def main(classes, interval, pushover=None):
-    def cb(s):
-        try:
-            timestamped_print(s)
-            if pushover is not None:
-                push_alert(s, pushover[0], pushover[1])
-        except Exception:
-            traceback.print_exc()
+    checkers = [Checker(c) for c in classes]
 
-    grades = {}
-    checker(sleepy(classes), grades, timestamped_print)
+    for c in checkers:
+        for update in c.update():
+            timestamped_print(update)
+
     print('{:=^78}'.format("Initialized"))
 
-    while True:
+    for c in itertools.cycle(checkers):
         time.sleep(interval)
-
         try:
-            checker(sleepy(classes), grades, cb)
+            for update in c.update():
+                timestamped_print(s)
+                if pushover is not None:
+                    push_alert(s, pushover[0], pushover[1])
         except Exception:
             traceback.print_exc()
 
 Class = collections.namedtuple('Class', ['name', 'gradesource', 'secret_number'])
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
-    parser.add_argument('--interval', type=int, default=60,
-            help='Interval between checks')
+    parser.add_argument('--interval', type=int, default=30,
+            help='seconds between queries to gradesource')
     parser.add_argument('--pushover', nargs=2, metavar=('TOKEN', 'USER'),
-            help='Pushover app credentials')
+            help='pushover app credentials')
     parser.add_argument('--class', action='append', nargs=3, default=[],
-            metavar=('NAME', 'GRADESOURCE_URL', 'SECRET_NUMBER'))
+            metavar=('NAME', 'GRADESOURCE_URL', 'SECRET_NUMBER'), required=True,
+            help='use the assessment page (/scores.html) for url')
     args = parser.parse_args()
 
     main([Class(*c) for c in getattr(args, 'class')], args.interval, args.pushover)
