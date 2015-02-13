@@ -77,13 +77,13 @@ class Checker:
         cls_name = self.cls.name
         grades = set(fetch_grades(self.cls.gradesource, self.cls.secretnumber))
 
-        for g in sorted(grades - self.grades):
-            self.grades.add(g)
-            yield "+ %s %s: %s (Rank %s)" % (cls_name, g.name, g.score, g.rank)
-
         for g in sorted(self.grades - grades):
             self.grades.remove(g)
             yield "- %s %s: %s (Rank %s)" % (cls_name, g.name, g.score, g.rank)
+
+        for g in sorted(grades - self.grades):
+            self.grades.add(g)
+            yield "+ %s %s: %s (Rank %s)" % (cls_name, g.name, g.score, g.rank)
 
 def timestamped_print(s):
     print("%s %s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), s))
