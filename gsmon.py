@@ -2,6 +2,7 @@
 from lxml import html
 from urllib.parse import urlencode
 from urllib.request import urlopen
+from urllib.error import URLError
 import argparse
 import collections
 import datetime
@@ -104,6 +105,8 @@ def main(classes, interval, pushover=None):
                 timestamped_print(update)
                 if pushover is not None:
                     push_alert(update, pushover[0], pushover[1])
+        except URLError:
+            pass
         except Exception:
             traceback.print_exc()
 
