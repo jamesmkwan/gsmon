@@ -50,7 +50,8 @@ def fetch_grades(gradesource, secretnumber):
         assert header[1] == 'Score'
 
         try:
-            s = sorted((i for i in rest if i), key=float, reverse=True)
+            scores = (x.rstrip('*') for x in rest)
+            s = sorted((i for i in scores if i), key=float, reverse=True)
             rank = s.index(score) + 1
         except ValueError:
             rank = "?"
